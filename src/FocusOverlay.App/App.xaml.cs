@@ -38,6 +38,8 @@ public partial class App : System.Windows.Application
                 Controller.AddCard(card);
             }
 
+            Controller.SetConnections(await Repo.GetConnectionsAsync());
+
             Controller.RegisterHotkeys();
         }
         catch (Exception exception)

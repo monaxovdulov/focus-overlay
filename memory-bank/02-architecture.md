@@ -48,6 +48,8 @@ App lifecycle
 │   ├── CardWindow(Task)
 │   ├── CardWindow(Note)
 │   └── CardWindow(Image)
+├── ConnectionOverlayWindow (click-through drawing only)
+├── ConnectionEditorWindow
 └── CardRepository(SQLite)
 ```
 
@@ -68,7 +70,9 @@ Card window:
 - минимальный размер 180×100 DIP;
 - нормальный стартовый размер около 320×180 DIP.
 
-Режим «Не мешать» добавляет к HWND extended style `WS_EX_TRANSPARENT`, не скрывая окно и не убирая его контур. Edit mode удаляет click-through style. Применение выполняется после получения HWND через `WindowInteropHelper` и должно быть идемпотентным. `AllowsTransparency=True` намеренно не используется, чтобы не ухудшать WPF rendering performance.
+Режим «Не мешать» добавляет к HWND extended style `WS_EX_TRANSPARENT`, не скрывая окно и не убирая его контур. Edit mode удаляет click-through style. Применение выполняется после получения HWND через `WindowInteropHelper` и должно быть идемпотентным. `AllowsTransparency=True` намеренно не используется для card windows, чтобы не ухудшать WPF rendering performance.
+
+Исключение — единый `ConnectionOverlayWindow`: это простой click-through drawing surface без controls и содержимого карточек. Он использует transparency для линий в промежутках между независимыми окнами, не принимает input и перерисовывается только при изменении геометрии/данных либо во время короткой анимации.
 
 ## Hotkeys
 

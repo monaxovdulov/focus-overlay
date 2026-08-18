@@ -138,8 +138,126 @@ public sealed class SqliteCardRepository : ICardRepository
         {
             await using var connection = new SqliteConnection(connectionString);
             await connection.OpenAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
+            await using (var links = connection.CreateCommand())
+            {
+                links.Transaction = (SqliteTransaction)transaction;
+                links.CommandText = "DELETE FROM connections WHERE source_card_id = $id OR target_card_id = $id";
+                links.Parameters.AddWithValue("$id", id.ToString());
+                await links.ExecuteNonQueryAsync();
+            }
+
+            await using (var command = connection.CreateCommand())
+            {
+                command.Transaction = (SqliteTransaction)transaction;
+                command.CommandText = "DELETE FROM cards WHERE id = $id";
+                command.Parameters.AddWithValue("$id", id.ToString());
+                await command.ExecuteNonQueryAsync();
+            }
+
+            await transaction.CommitAsync();
+        }
+        finally
+        {
+            writeGate.Release();
+        }
+    }
+
+    public async Task<IReadOnlyList<CardConnection>> GetConnectionsAsync()
+    {
+        var connections = new List<CardConnection>();
+        await using var connection = new SqliteConnection(connectionString);
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, source_card_id, target_card_id, label, color, direction, created, updated
+            FROM connections
+            ORDER BY created ASC
+            """;
+
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            try
+            {
+                var direction = (ConnectionDirection)reader.GetInt32(5);
+                if (!Enum.IsDefined(direction))
+                {
+                    continue;
+                }
+
+                connections.Add(new CardConnection
+                {
+                    Id = Guid.Parse(reader.GetString(0)),
+                    SourceCardId = Guid.Parse(reader.GetString(1)),
+                    TargetCardId = Guid.Parse(reader.GetString(2)),
+                    Label = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
+                    Color = reader.IsDBNull(4) ? "#697BE8" : reader.GetString(4),
+                    Direction = direction,
+                    CreatedUtc = ParseUtc(reader, 6),
+                    UpdatedUtc = ParseUtc(reader, 7)
+                });
+            }
+            catch
+            {
+                // One broken relation must not prevent the rest of the workspace from loading.
+            }
+        }
+
+        return connections;
+    }
+
+    public async Task SaveConnectionAsync(CardConnection relation)
+    {
+        if (relation.SourceCardId == relation.TargetCardId)
+        {
+            throw new ArgumentException("A card cannot be connected to itself.", nameof(relation));
+        }
+
+        await writeGate.WaitAsync();
+        try
+        {
+            relation.UpdatedUtc = DateTime.UtcNow;
+            await using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync();
             await using var command = connection.CreateCommand();
-            command.CommandText = "DELETE FROM cards WHERE id = $id";
+            command.CommandText = """
+                INSERT INTO connections (
+                    id, source_card_id, target_card_id, label, color, direction, created, updated)
+                VALUES ($id, $source, $target, $label, $color, $direction, $created, $updated)
+                ON CONFLICT(id) DO UPDATE SET
+                    source_card_id = excluded.source_card_id,
+                    target_card_id = excluded.target_card_id,
+                    label = excluded.label,
+                    color = excluded.color,
+                    direction = excluded.direction,
+                    updated = excluded.updated
+                """;
+            command.Parameters.AddWithValue("$id", relation.Id.ToString());
+            command.Parameters.AddWithValue("$source", relation.SourceCardId.ToString());
+            command.Parameters.AddWithValue("$target", relation.TargetCardId.ToString());
+            command.Parameters.AddWithValue("$label", relation.Label ?? string.Empty);
+            command.Parameters.AddWithValue("$color", relation.Color ?? "#697BE8");
+            command.Parameters.AddWithValue("$direction", (int)relation.Direction);
+            command.Parameters.AddWithValue("$created", relation.CreatedUtc.ToString("O"));
+            command.Parameters.AddWithValue("$updated", relation.UpdatedUtc.ToString("O"));
+            await command.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            writeGate.Release();
+        }
+    }
+
+    public async Task DeleteConnectionAsync(Guid id)
+    {
+        await writeGate.WaitAsync();
+        try
+        {
+            await using var connection = new SqliteConnection(connectionString);
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM connections WHERE id = $id";
             command.Parameters.AddWithValue("$id", id.ToString());
             await command.ExecuteNonQueryAsync();
         }
@@ -178,6 +296,23 @@ public sealed class SqliteCardRepository : ICardRepository
             )
             """;
         command.ExecuteNonQuery();
+
+        using var connections = connection.CreateCommand();
+        connections.CommandText = """
+            CREATE TABLE IF NOT EXISTS connections (
+                id TEXT PRIMARY KEY,
+                source_card_id TEXT NOT NULL,
+                target_card_id TEXT NOT NULL,
+                label TEXT NOT NULL DEFAULT '',
+                color TEXT NOT NULL DEFAULT '#697BE8',
+                direction INTEGER NOT NULL DEFAULT 1,
+                created TEXT NOT NULL,
+                updated TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS ix_connections_source ON connections(source_card_id);
+            CREATE INDEX IF NOT EXISTS ix_connections_target ON connections(target_card_id);
+            """;
+        connections.ExecuteNonQuery();
 
         using var migration = connection.CreateCommand();
         migration.CommandText = "SELECT COUNT(*) FROM pragma_table_info('cards') WHERE name = 'image_fill'";

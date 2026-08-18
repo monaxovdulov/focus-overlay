@@ -69,6 +69,52 @@ public class RepositoryTests
         Assert.InRange(card.Opacity, 0.35, 1);
     }
 
+    [Fact]
+    public async Task ConnectionRoundTripPersistsLabelColorAndDirection()
+    {
+        var repository = new SqliteCardRepository(NewDatabasePath());
+        var source = new FocusCard { Title = "Идея" };
+        var target = new FocusCard { Title = "Действие" };
+        await repository.SaveAsync(source);
+        await repository.SaveAsync(target);
+        var relation = new CardConnection
+        {
+            SourceCardId = source.Id,
+            TargetCardId = target.Id,
+            Label = "приводит к",
+            Color = "#49A984",
+            Direction = ConnectionDirection.Both
+        };
+
+        await repository.SaveConnectionAsync(relation);
+        var loaded = Assert.Single(await repository.GetConnectionsAsync());
+
+        Assert.Equal(relation.Id, loaded.Id);
+        Assert.Equal("приводит к", loaded.Label);
+        Assert.Equal("#49A984", loaded.Color);
+        Assert.Equal(ConnectionDirection.Both, loaded.Direction);
+    }
+
+    [Fact]
+    public async Task DeletingCardAlsoDeletesItsConnections()
+    {
+        var repository = new SqliteCardRepository(NewDatabasePath());
+        var source = new FocusCard();
+        var target = new FocusCard();
+        await repository.SaveAsync(source);
+        await repository.SaveAsync(target);
+        await repository.SaveConnectionAsync(new CardConnection
+        {
+            SourceCardId = source.Id,
+            TargetCardId = target.Id
+        });
+
+        await repository.DeleteAsync(source.Id);
+
+        Assert.Empty(await repository.GetConnectionsAsync());
+        Assert.Single(await repository.GetAllAsync());
+    }
+
     private static string NewDatabasePath() =>
         Path.Combine(Path.GetTempPath(), $"focus-{Guid.NewGuid():N}.db");
 }

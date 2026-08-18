@@ -63,3 +63,35 @@
 - `dotnet test FocusOverlay.slnx -c Release --no-build` — успешно, 6/6 tests.
 - `dotnet publish src/FocusOverlay.App -c Release -r win-x64 --self-contained true -o artifacts/win-x64` — успешно.
 - Реальный cross-window drag из Chrome не удалось автоматизировать: Windows Computer Use остановился, не сумев достоверно определить URL вкладки. Ручная проверка остаётся обязательной.
+
+## 2026-08-18 — card connections
+
+- Добавлены persistent `CardConnection`: source/target, подпись, цвет и направление `None/Forward/Backward/Both`.
+- Hover-only порт `●` рисует live пунктирную Bézier-кривую, подсвечивает цель и создаёт связь при отпускании над другой карточкой.
+- Один прозрачный topmost overlay всегда имеет click-through/no-activate Win32 styles; он не мешает приложениям под линиями.
+- Появление связи сопровождается ограниченной 500-мс пружинной анимацией; постоянного rendering loop нет.
+- Редактор `⌁` позволяет менять подпись, пять цветовых пресетов, направление и удалять связь.
+- SQLite CRUD параметризован; удаление карточки и её связей выполняется одной транзакцией; восстановление происходит при startup.
+- Добавлены два regression tests: полный round-trip свойств связи и cascade cleanup при удалении карточки.
+- `dotnet test FocusOverlay.slnx -c Release --no-restore` — успешно, 8/8 tests.
+- `dotnet publish src/FocusOverlay.App -c Release -r win-x64 --self-contained true -o artifacts/win-x64 --no-restore` — успешно, 0 warnings / 0 errors.
+- Published startup smoke: процесс отвечал через 2 секунды, SQLite migration не вызвала startup crash.
+- Автоматический drag между карточками не выполнен: Windows Computer Use дважды остановил input из-за одновременного пользовательского ввода. Нужна ручная проверка жеста.
+
+## 2026-08-18 — Relation Lens (FOC-014)
+
+- Связи получили белый полупрозрачный halo, тонкий цветной stroke со скруглёнными краями и компактные inset-наконечники перед границей карточки.
+- Цвет синхронизирован для линии, endpoint-портов, стрелок, подписи и активных controls инспектора; используются пять пресетов `#3979E9`, `#41AA7B`, `#E89718`, `#8A55D0`, `#EF5049`.
+- `⌁` включает Relation Lens: связи выбранной карточки остаются на 100%, остальные мягко приглушаются до 30%, появляются релевантные порты и подписи; `Esc` и `×` закрывают режим.
+- Инспектор размером 270 × 210 px закрепляется рядом с карточкой на стороне, не пересекающей основное направление связей. При нескольких связях показывается компактный горизонтальный список, раскрыта только выбранная.
+- В инспекторе доступны подпись, пять небольших цветовых точек, направления `— → ← ↔` и удаление через `•••`.
+- Новая связь больше не открывает редактор автоматически: на исходной карточке появляется подсказка `Связь создана · ⌁ настроить`. Повторная связь открывает существующую запись.
+- Анимации lens ограничены 190 мс, hint — 120/260 мс, pulse — 500 мс; постоянный rendering loop отсутствует.
+- Добавлены 2 regression tests для выбора связей и opacity Relation Lens.
+- `dotnet restore FocusOverlay.slnx` — успешно.
+- `dotnet build FocusOverlay.slnx -c Release --no-restore` — успешно, 0 warnings / 0 errors.
+- `dotnet test FocusOverlay.slnx -c Release --no-build` — успешно, 10/10 tests.
+- Первый publish с `--no-restore` после обычного solution restore ожидаемо выявил отсутствующий `net10.0-windows/win-x64` asset (`NETSDK1047`); штатная команда ниже выполнила RID restore.
+- `dotnet publish src/FocusOverlay.App -c Release -r win-x64 --self-contained true -o artifacts/win-x64` — успешно.
+- Визуальный QA выполнялся с изолированным `%LOCALAPPDATA%`: Release-приложение запустилось, controller отображался, две Note-карточки создались, пользовательская SQLite-база не изменялась.
+- Published startup smoke выполнен дважды: после штатного RID restore процесс PID 26272 отвечал через 3 секунды; после финального publish процесс PID 6892 отвечал через 2 секунды. Оба процесса затем остановлены в рамках bounded проверки.

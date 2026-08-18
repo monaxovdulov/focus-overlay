@@ -147,6 +147,23 @@
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
                             <Grid.RowDefinitions>
+                                <RowDefinition Height="26"/>
+                                <RowDefinition Height="26"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="●" Foreground="#697BE8" FontSize="14"/>
+                            <TextBlock Grid.Column="1" Text="Потянуть связь" FontSize="12" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Row="1" Text="⌁" Foreground="#777A73" FontSize="15"/>
+                            <TextBlock Grid.Row="1" Grid.Column="1" Text="Подпись, цвет и стрелки" FontSize="12" VerticalAlignment="Center"/>
+                        </Grid>
+
+                        <Border Height="1" Background="#E2E0DA" Margin="0,9"/>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="28"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
                                 <RowDefinition Height="28"/>
                                 <RowDefinition Height="28"/>
                             </Grid.RowDefinitions>

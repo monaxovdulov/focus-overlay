@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
 using FocusOverlay.Core;
+using Point = System.Windows.Point;
 
 namespace FocusOverlay.App;
 
@@ -16,6 +17,12 @@ public partial class MainWindow : Window
     private const uint ModShift = 0x0004;
 
     private readonly Dictionary<Guid, CardWindow> cardWindows = [];
+    private readonly List<CardConnection> connections = [];
+    private ConnectionOverlayWindow? connectionOverlay;
+    private ConnectionEditorWindow? connectionEditor;
+    private Guid? connectionDragSource;
+    private Guid? highlightedTarget;
+    private Guid? relationLensCardId;
     private HwndSource? source;
     private bool isFocusMode;
     private bool isExiting;
@@ -28,6 +35,9 @@ public partial class MainWindow : Window
             WindowAppearance.Apply(this);
             source = HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);
             source?.AddHook(WindowHook);
+            connectionOverlay = new ConnectionOverlayWindow();
+            connectionOverlay.Show();
+            Activate();
         };
         Closing += OnControllerClosing;
         UpdateControllerState();
@@ -42,18 +52,177 @@ public partial class MainWindow : Window
 
         var window = new CardWindow(card);
         cardWindows[card.Id] = window;
+        window.GeometryChanged += (_, _) => RefreshConnections();
         window.Closed += (_, _) =>
         {
             cardWindows.Remove(card.Id);
             UpdateCardCount();
+            RefreshConnections();
         };
         window.Show();
         window.SetFocusMode(isFocusMode);
         UpdateCardCount();
+        RefreshConnections();
+    }
+
+    public void SetConnections(IEnumerable<CardConnection> restored)
+    {
+        connections.Clear();
+        connections.AddRange(restored.Where(link =>
+            cardWindows.ContainsKey(link.SourceCardId) &&
+            cardWindows.ContainsKey(link.TargetCardId)));
+        RefreshConnections();
+    }
+
+    public void BeginConnectionDrag(Guid sourceCardId, Point pointer)
+    {
+        if (isFocusMode || !cardWindows.TryGetValue(sourceCardId, out var sourceWindow))
+        {
+            return;
+        }
+
+        connectionDragSource = sourceCardId;
+        UpdateConnectionDrag(pointer);
+        connectionOverlay?.SetLiveConnection(BoundsOf(sourceWindow), pointer, "#697BE8");
+    }
+
+    public void UpdateConnectionDrag(Point pointer)
+    {
+        if (connectionDragSource is not Guid sourceId ||
+            !cardWindows.TryGetValue(sourceId, out var sourceWindow))
+        {
+            return;
+        }
+
+        var target = FindConnectionTarget(pointer, sourceId);
+        SetHighlightedTarget(target);
+        connectionOverlay?.SetLiveConnection(BoundsOf(sourceWindow), pointer, "#697BE8");
+    }
+
+    public async Task CompleteConnectionDragAsync(Point pointer)
+    {
+        if (connectionDragSource is not Guid sourceId)
+        {
+            return;
+        }
+
+        var targetId = FindConnectionTarget(pointer, sourceId);
+        CancelConnectionDrag();
+        if (targetId is not Guid destinationId)
+        {
+            return;
+        }
+
+        var existing = connections.FirstOrDefault(link =>
+            (link.SourceCardId == sourceId && link.TargetCardId == destinationId) ||
+            (link.SourceCardId == destinationId && link.TargetCardId == sourceId));
+        if (existing is not null)
+        {
+            connectionOverlay?.Pulse(existing.Id);
+            ShowConnections(sourceId, existing.Id);
+            return;
+        }
+
+        var relation = new CardConnection
+        {
+            SourceCardId = sourceId,
+            TargetCardId = destinationId,
+            Color = ConnectionEditorWindow.Palette[connections.Count % ConnectionEditorWindow.Palette.Length],
+            Direction = ConnectionDirection.Forward
+        };
+
+        try
+        {
+            await App.Repo.SaveConnectionAsync(relation);
+            connections.Add(relation);
+            RefreshConnections();
+            connectionOverlay?.Pulse(relation.Id);
+            if (cardWindows.TryGetValue(sourceId, out var sourceCard))
+            {
+                sourceCard.ShowConnectionCreatedHint();
+            }
+        }
+        catch (Exception exception)
+        {
+            ReportWarning($"Не удалось создать связь: {exception.Message}");
+        }
+    }
+
+    public void CancelConnectionDrag()
+    {
+        connectionDragSource = null;
+        SetHighlightedTarget(null);
+        connectionOverlay?.ClearLiveConnection();
+    }
+
+    public void ShowConnections(Guid cardId, Guid? selectedRelationId = null)
+    {
+        if (!cardWindows.TryGetValue(cardId, out var cardWindow))
+        {
+            return;
+        }
+
+        CloseRelationLens();
+        relationLensCardId = cardId;
+        ApplyRelationLens();
+        var editor = new ConnectionEditorWindow(
+            SaveConnectionAsync,
+            DeleteConnectionAsync,
+            RefreshConnections);
+        connectionEditor = editor;
+        editor.Load(
+            cardId,
+            connections,
+            cardWindows.ToDictionary(pair => pair.Key, pair => pair.Value.Card),
+            selectedRelationId);
+        editor.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(connectionEditor, editor))
+            {
+                connectionEditor = null;
+                relationLensCardId = null;
+                ApplyRelationLens();
+            }
+        };
+        var cardBounds = BoundsOf(cardWindow);
+        var placement = InspectorPlacement(cardId, cardBounds);
+        editor.Left = placement.X;
+        editor.Top = placement.Y;
+        editor.Show();
+    }
+
+    public bool CloseRelationLens()
+    {
+        if (relationLensCardId is null && connectionEditor is null)
+        {
+            return false;
+        }
+
+        var editor = connectionEditor;
+        connectionEditor = null;
+        relationLensCardId = null;
+        ApplyRelationLens();
+        editor?.Close();
+        return true;
+    }
+
+    public async Task DeleteCardAsync(Guid cardId)
+    {
+        await App.Repo.DeleteAsync(cardId);
+        connections.RemoveAll(link =>
+            link.SourceCardId == cardId || link.TargetCardId == cardId);
+        if (highlightedTarget == cardId || connectionDragSource == cardId)
+        {
+            CancelConnectionDrag();
+        }
+
+        CloseRelationLens();
+        RefreshConnections();
     }
 
     public void ToggleFocus()
     {
+        CloseRelationLens();
         var nextMode = !isFocusMode;
         try
         {
@@ -128,6 +297,9 @@ public partial class MainWindow : Window
         {
             window.Close();
         }
+
+        connectionEditor?.Close();
+        connectionOverlay?.Close();
 
         App.Tray?.Dispose();
         System.Windows.Application.Current.Shutdown();
@@ -206,6 +378,111 @@ public partial class MainWindow : Window
         var count = cardWindows.Count;
         CardCount.Text = count.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
+
+    private async Task SaveConnectionAsync(CardConnection relation)
+    {
+        await App.Repo.SaveConnectionAsync(relation);
+        RefreshConnections();
+    }
+
+    private async Task DeleteConnectionAsync(CardConnection relation)
+    {
+        await App.Repo.DeleteConnectionAsync(relation.Id);
+        connections.Remove(relation);
+        RefreshConnections();
+    }
+
+    private void RefreshConnections()
+    {
+        connectionOverlay?.UpdateScene(
+            connections,
+            cardWindows.ToDictionary(pair => pair.Key, pair => BoundsOf(pair.Value)));
+    }
+
+    private void ApplyRelationLens()
+    {
+        connectionOverlay?.SetRelationLens(relationLensCardId);
+        foreach (var (id, window) in cardWindows)
+        {
+            var participates = relationLensCardId is Guid selected &&
+                (id == selected || connections.Any(link =>
+                    RelationLens.Includes(link, selected) && RelationLens.Includes(link, id)));
+            window.SetRelationLens(participates);
+        }
+    }
+
+    private Point InspectorPlacement(Guid cardId, Rect cardBounds)
+    {
+        const double gap = 12;
+        const double edge = 10;
+        var relatedCenters = connections
+            .Where(link => link.SourceCardId == cardId || link.TargetCardId == cardId)
+            .Select(link => link.SourceCardId == cardId ? link.TargetCardId : link.SourceCardId)
+            .Where(cardWindows.ContainsKey)
+            .Select(id => BoundsOf(cardWindows[id]))
+            .Select(rect => new Point(rect.Left + rect.Width / 2, rect.Top + rect.Height / 2))
+            .ToArray();
+        var center = new Point(cardBounds.Left + cardBounds.Width / 2, cardBounds.Top + cardBounds.Height / 2);
+        var average = relatedCenters.Length == 0
+            ? new Point(center.X + 1, center.Y)
+            : new Point(relatedCenters.Average(point => point.X), relatedCenters.Average(point => point.Y));
+
+        var below = new Point(cardBounds.Left + 22, cardBounds.Bottom + gap);
+        var above = new Point(cardBounds.Left + 22, cardBounds.Top - ConnectionEditorWindow.InspectorHeight - gap);
+        var right = new Point(cardBounds.Right + gap, cardBounds.Top);
+        var left = new Point(cardBounds.Left - ConnectionEditorWindow.InspectorWidth - gap, cardBounds.Top);
+        Point preferred;
+        if (Math.Abs(average.X - center.X) >= Math.Abs(average.Y - center.Y))
+        {
+            preferred = cardBounds.Bottom + gap + ConnectionEditorWindow.InspectorHeight <=
+                        SystemParameters.VirtualScreenTop + SystemParameters.VirtualScreenHeight - edge
+                ? below
+                : above;
+        }
+        else
+        {
+            preferred = average.X >= center.X ? left : right;
+        }
+
+        var minX = SystemParameters.VirtualScreenLeft + edge;
+        var minY = SystemParameters.VirtualScreenTop + edge;
+        var maxX = SystemParameters.VirtualScreenLeft + SystemParameters.VirtualScreenWidth -
+                   ConnectionEditorWindow.InspectorWidth - edge;
+        var maxY = SystemParameters.VirtualScreenTop + SystemParameters.VirtualScreenHeight -
+                   ConnectionEditorWindow.InspectorHeight - edge;
+        return new Point(Math.Clamp(preferred.X, minX, maxX), Math.Clamp(preferred.Y, minY, maxY));
+    }
+
+    private Guid? FindConnectionTarget(Point pointer, Guid sourceId) =>
+        cardWindows
+            .Where(pair => pair.Key != sourceId && BoundsOf(pair.Value).Contains(pointer))
+            .Select(pair => (Guid?)pair.Key)
+            .FirstOrDefault();
+
+    private void SetHighlightedTarget(Guid? target)
+    {
+        if (highlightedTarget == target)
+        {
+            return;
+        }
+
+        if (highlightedTarget is Guid previous && cardWindows.TryGetValue(previous, out var oldWindow))
+        {
+            oldWindow.SetConnectionTargetHighlight(false);
+        }
+
+        highlightedTarget = target;
+        if (target is Guid next && cardWindows.TryGetValue(next, out var newWindow))
+        {
+            newWindow.SetConnectionTargetHighlight(true);
+        }
+    }
+
+    private static Rect BoundsOf(CardWindow window) => new(
+        window.Left,
+        window.Top,
+        Math.Max(window.MinWidth, window.ActualWidth > 0 ? window.ActualWidth : window.Width),
+        Math.Max(window.MinHeight, window.ActualHeight > 0 ? window.ActualHeight : window.Height));
 
     private void SetWarning(string message)
     {

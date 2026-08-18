@@ -9,6 +9,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using FocusOverlay.Core;
 using Microsoft.Win32;
+using Point = System.Windows.Point;
 
 namespace FocusOverlay.App;
 
@@ -20,11 +21,18 @@ public partial class CardWindow : Window
     private readonly FocusCard card;
     private readonly DispatcherTimer saveTimer;
     private readonly DispatcherTimer hintTimer;
+    private readonly DispatcherTimer connectionHintTimer;
     private readonly SemaphoreSlim saveGate = new(1, 1);
     private bool isInitialized;
     private bool isDeleted;
     private bool isFocusMode;
     private bool hasPendingSave;
+    private bool isConnecting;
+    private bool isRelationLensVisible;
+
+    public FocusCard Card => card;
+
+    public event EventHandler? GeometryChanged;
 
     public CardWindow(FocusCard card)
     {
@@ -45,6 +53,16 @@ public partial class CardWindow : Window
         {
             hintTimer.Stop();
             AnimateInputHint(false);
+        };
+
+        connectionHintTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(1900)
+        };
+        connectionHintTimer.Tick += (_, _) =>
+        {
+            connectionHintTimer.Stop();
+            AnimateConnectionHint(false);
         };
 
         Left = card.X;
@@ -99,8 +117,14 @@ public partial class CardWindow : Window
 
     public void SetFocusMode(bool enabled)
     {
+        if (enabled && isConnecting)
+        {
+            CancelConnectionDrag();
+        }
+
         isFocusMode = enabled;
         AnimateEditChrome(!enabled && IsMouseOver);
+        AnimateRelationChrome(!enabled && (IsMouseOver || isRelationLensVisible));
         CardShell.BorderThickness = new Thickness(1);
 
         ApplyClickThrough();
@@ -194,6 +218,7 @@ public partial class CardWindow : Window
         card.X = Left;
         card.Y = Top;
         ScheduleSave();
+        GeometryChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -206,6 +231,7 @@ public partial class CardWindow : Window
         card.Width = ActualWidth;
         card.Height = ActualHeight;
         ScheduleSave();
+        GeometryChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void Header_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -216,11 +242,114 @@ public partial class CardWindow : Window
         }
     }
 
-    private void Window_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e) =>
+    private void Window_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
+    {
         AnimateEditChrome(!isFocusMode);
+        AnimateRelationChrome(!isFocusMode);
+    }
 
-    private void Window_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e) =>
-        AnimateEditChrome(false);
+    private void Window_MouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        AnimateEditChrome(isConnecting);
+        AnimateRelationChrome(isConnecting || isRelationLensVisible);
+    }
+
+    private void ConnectionPort_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (isFocusMode)
+        {
+            return;
+        }
+
+        isConnecting = true;
+        Mouse.Capture(this, CaptureMode.SubTree);
+        var point = ScreenPoint(e.GetPosition(this));
+        App.Controller.BeginConnectionDrag(card.Id, point);
+        e.Handled = true;
+    }
+
+    private void Window_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (!isConnecting || e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        App.Controller.UpdateConnectionDrag(ScreenPoint(e.GetPosition(this)));
+        e.Handled = true;
+    }
+
+    private async void Window_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!isConnecting)
+        {
+            return;
+        }
+
+        var point = ScreenPoint(e.GetPosition(this));
+        isConnecting = false;
+        Mouse.Capture(null);
+        await App.Controller.CompleteConnectionDragAsync(point);
+        AnimateEditChrome(IsMouseOver && !isFocusMode);
+        e.Handled = true;
+    }
+
+    private void Connections_Click(object sender, RoutedEventArgs e) =>
+        App.Controller.ShowConnections(card.Id);
+
+    private void Window_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape && App.Controller.CloseRelationLens())
+        {
+            e.Handled = true;
+        }
+    }
+
+    public void SetRelationLens(bool visible)
+    {
+        isRelationLensVisible = visible;
+        AnimateRelationChrome(!isFocusMode && (visible || IsMouseOver));
+    }
+
+    public void ShowConnectionCreatedHint()
+    {
+        connectionHintTimer.Stop();
+        AnimateConnectionHint(true);
+        connectionHintTimer.Start();
+    }
+
+    public void SetConnectionTargetHighlight(bool enabled)
+    {
+        var target = enabled
+            ? System.Windows.Media.Color.FromRgb(105, 123, 232)
+            : System.Windows.Media.Color.FromRgb(217, 215, 209);
+        var brush = CardShell.BorderBrush as SolidColorBrush;
+        if (brush is null || brush.IsFrozen)
+        {
+            brush = new SolidColorBrush(target);
+            CardShell.BorderBrush = brush;
+        }
+
+        brush.BeginAnimation(
+            SolidColorBrush.ColorProperty,
+            new ColorAnimation
+            {
+                To = target,
+                Duration = TimeSpan.FromMilliseconds(enabled ? 130 : 210),
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+                FillBehavior = FillBehavior.HoldEnd
+            },
+            HandoffBehavior.SnapshotAndReplace);
+    }
+
+    private Point ScreenPoint(Point local) => new(Left + local.X, Top + local.Y);
+
+    private void CancelConnectionDrag()
+    {
+        isConnecting = false;
+        Mouse.Capture(null);
+        App.Controller.CancelConnectionDrag();
+    }
 
     private async void ChooseImage_Click(object sender, RoutedEventArgs e)
     {
@@ -439,7 +568,7 @@ public partial class CardWindow : Window
 
         try
         {
-            await App.Repo.DeleteAsync(card.Id);
+            await App.Controller.DeleteCardAsync(card.Id);
             Close();
         }
         catch (Exception exception)
@@ -481,6 +610,38 @@ public partial class CardWindow : Window
         EditChrome.BeginAnimation(
             OpacityProperty,
             animation,
+            HandoffBehavior.SnapshotAndReplace);
+    }
+
+    private void AnimateRelationChrome(bool show)
+    {
+        RelationChrome.IsHitTestVisible = show;
+        RelationChrome.BeginAnimation(
+            OpacityProperty,
+            new DoubleAnimation
+            {
+                To = show ? 1 : 0,
+                Duration = TimeSpan.FromMilliseconds(show ? 145 : 220),
+                EasingFunction = new QuadraticEase
+                {
+                    EasingMode = show ? EasingMode.EaseOut : EasingMode.EaseInOut
+                },
+                FillBehavior = FillBehavior.HoldEnd
+            },
+            HandoffBehavior.SnapshotAndReplace);
+    }
+
+    private void AnimateConnectionHint(bool show)
+    {
+        ConnectionHint.BeginAnimation(
+            OpacityProperty,
+            new DoubleAnimation
+            {
+                To = show ? 1 : 0,
+                Duration = TimeSpan.FromMilliseconds(show ? 120 : 260),
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+                FillBehavior = FillBehavior.HoldEnd
+            },
             HandoffBehavior.SnapshotAndReplace);
     }
 

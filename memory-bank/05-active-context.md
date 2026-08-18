@@ -13,6 +13,10 @@
 - Image-карточка принимает `Ctrl+V` после клика по изображению и один image file через Explorer drag-and-drop; bitmap сохраняется в локальную папку приложения.
 - Для Image доступен сохраняемый полноформатный режим `UniformToFill` без заголовка и полей; переключатель `⛶` / `↙` появляется при hover.
 - Browser drag распознаёт bitmap, HTML `<img src>`, URI и Chromium/Firefox URL formats; remote image импортируется локально с MIME/decode/size/timeout проверками.
+- Карточки связываются протягиванием hover-only порта `●`: гибкая цветная кривая поддерживает подпись и направления `—` / `→` / `←` / `↔`.
+- Символ `⌁` включает Relation Lens: релевантные линии, порты и подписи отображаются полностью, остальные связи приглушаются до 30%; `Esc` закрывает lens.
+- Линии имеют белый halo, тонкий синхронизированный цветной stroke и inset-наконечники; после создания показывается подсказка без автоматического открытия инспектора.
+- Инспектор закрепляется рядом с карточкой, имеет размер 270 × 210 px и раскрывает одну выбранную связь из компактного списка.
 - Устранены двойной controller и поток параллельных SQLite writes; работают single-instance, debounce, serialized writes и shutdown flush.
 - Ограничения: rolling file log и полноценные automated UI tests не добавлены; интерактивные сценарии проверялись bounded UI smoke tests.
 
@@ -29,7 +33,7 @@
 
 ## Next action
 
-Провести ручной пользовательский прогон browser drag на Reddit/Chrome и других нужных сайтах. MVP tasks `FOC-001..FOC-012` реализованы; browser cross-window behavior остаётся site-dependent и требует ручной проверки.
+Провести ручной прогон двух cross-window сценариев на пользовательских сайтах/раскладке: browser image drag и протягивание `●` между двумя карточками. MVP tasks `FOC-001..FOC-014` реализованы; automated tests проходят `10/10`.
 
 ## Known risks to validate early
 
