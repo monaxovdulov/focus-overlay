@@ -1,0 +1,24 @@
+# .NET / Visual Studio
+bin/
+obj/
+.vs/
+TestResults/
+*.user
+*.suo
+
+# Local builds and visual QA
+artifacts/
+
+# Local application data
+*.db
+*.db-shm
+*.db-wal
+*.log
+logs/
+images/
+
+# Editors and operating system
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

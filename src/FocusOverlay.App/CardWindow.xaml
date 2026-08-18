@@ -1,0 +1,148 @@
+<Window x:Class="FocusOverlay.App.CardWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="Focus card"
+        WindowStyle="None"
+        ResizeMode="CanResize"
+        Background="#F5F4F0"
+        Topmost="True"
+        ShowInTaskbar="False"
+        MinWidth="240"
+        MinHeight="160"
+        Width="360"
+        Height="220"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        MouseEnter="Window_MouseEnter"
+        MouseLeave="Window_MouseLeave"
+        PreviewDragEnter="Window_PreviewDragEnter"
+        PreviewDragOver="Window_PreviewDragOver"
+        PreviewDragLeave="Window_PreviewDragLeave"
+        PreviewDrop="Window_PreviewDrop"
+        AllowDrop="True"
+        LocationChanged="Window_LocationChanged"
+        SizeChanged="Window_SizeChanged">
+    <Window.CommandBindings>
+        <CommandBinding Command="ApplicationCommands.Paste"
+                        CanExecute="PasteImage_CanExecute"
+                        Executed="PasteImage_Executed"/>
+    </Window.CommandBindings>
+
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="0"
+                            CornerRadius="14"
+                            GlassFrameThickness="0"
+                            ResizeBorderThickness="7"
+                            UseAeroCaptionButtons="False"/>
+    </shell:WindowChrome.WindowChrome>
+
+    <Border x:Name="CardShell"
+            Background="#F5F4F0"
+            BorderBrush="#D9D7D1"
+            BorderThickness="1"
+            CornerRadius="14"
+            ClipToBounds="True">
+        <Grid>
+            <Ellipse x:Name="TypeDot" Width="7" Height="7" Fill="#49A984"
+                     HorizontalAlignment="Left" VerticalAlignment="Top" Margin="15,14,0,0"/>
+
+            <Grid x:Name="ContentLayout" Margin="12,30,12,11">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <TextBox x:Name="TitleBox" Grid.Row="0" Margin="0,0,0,3"
+                         AutomationProperties.Name="Заголовок карточки"
+                         FontSize="17" FontWeight="SemiBold" Padding="7,4"
+                         Foreground="#242624" CaretBrush="#5968D9"
+                         Background="Transparent" BorderBrush="Transparent"
+                         SelectionBrush="#AEB8FF" TextChanged="Text_Changed"/>
+
+                <Grid Grid.Row="1">
+                    <TextBox x:Name="ContentBox" AcceptsReturn="True" TextWrapping="Wrap"
+                             AutomationProperties.Name="Содержимое карточки"
+                             VerticalScrollBarVisibility="Auto" Padding="7,5"
+                             FontSize="13" Foreground="#393B38" CaretBrush="#5968D9"
+                             Background="Transparent" BorderBrush="Transparent"
+                             SelectionBrush="#AEB8FF" TextChanged="Text_Changed"/>
+                </Grid>
+
+                <CheckBox x:Name="TaskDone" Grid.Row="2" Margin="7,4,0,0"
+                          Visibility="Collapsed" ToolTip="Готово"
+                          AutomationProperties.Name="Готово"
+                          Foreground="#646661" Checked="TaskDone_Changed" Unchecked="TaskDone_Changed"/>
+            </Grid>
+
+            <Button x:Name="ImagePanel" Visibility="Collapsed" Background="Transparent"
+                    Margin="12,67,12,11" Padding="0" BorderThickness="0"
+                    HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
+                    Focusable="True" FocusVisualStyle="{x:Null}" OverridesDefaultStyle="True"
+                    AutomationProperties.AutomationId="ImageInputArea"
+                    AutomationProperties.Name="Область изображения. Нажмите Control V или перетащите файл"
+                    PreviewMouseLeftButtonDown="ImagePanel_PreviewMouseLeftButtonDown">
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+                    </ControlTemplate>
+                </Button.Template>
+                <Grid Background="Transparent">
+                    <Image x:Name="ImagePreview" Stretch="Uniform"/>
+                    <StackPanel x:Name="ImagePlaceholder" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <TextBlock Text="▧" FontSize="24" HorizontalAlignment="Center" Foreground="#A2A39E"/>
+                        <TextBlock x:Name="ImagePlaceholderText" Text="Ctrl+V или перетащите"
+                                   Margin="0,6,0,0" FontSize="11" Foreground="#8B8C87"/>
+                    </StackPanel>
+
+                    <Border x:Name="DropCue" Visibility="Collapsed" Margin="1"
+                            Background="#26D69148" BorderBrush="#D69148" BorderThickness="1.5"
+                            CornerRadius="9" IsHitTestVisible="False">
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <TextBlock Text="↓" FontSize="25" Foreground="#B57334"
+                                       HorizontalAlignment="Center"/>
+                            <TextBlock Text="Отпустить" Margin="0,3,0,0" FontSize="11"
+                                       FontWeight="SemiBold" Foreground="#825326"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border x:Name="InputHint" Opacity="0" IsHitTestVisible="False"
+                            HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="10"
+                            Padding="10,6" CornerRadius="8" Background="#E82E302E">
+                        <TextBlock x:Name="InputHintText" FontSize="11" Foreground="White"/>
+                    </Border>
+                </Grid>
+            </Button>
+
+            <Border x:Name="EditChrome" HorizontalAlignment="Right" VerticalAlignment="Top"
+                    Margin="0,7,7,0" Padding="4,2" CornerRadius="9"
+                    Background="#EAF5F4F0" BorderBrush="#DDDAD3" BorderThickness="1"
+                    Opacity="0" IsHitTestVisible="False">
+                <StackPanel Orientation="Horizontal">
+                    <Border Width="27" Height="27" Background="Transparent" CornerRadius="7"
+                            Cursor="SizeAll" ToolTip="Переместить"
+                            MouseLeftButtonDown="Header_MouseLeftButtonDown">
+                        <TextBlock Text="⠿" FontSize="14" Foreground="#858680"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <Button x:Name="FillImageButton" Style="{StaticResource IconButton}"
+                            Width="27" Height="27" Content="⛶" Visibility="Collapsed"
+                            Foreground="#858680" FontSize="13" ToolTip="Заполнить карточку изображением"
+                            AutomationProperties.AutomationId="FillImageModeButton"
+                            AutomationProperties.Name="Заполнить карточку изображением"
+                            Click="FillImage_Click"/>
+                    <Button x:Name="ChooseImageButton" Style="{StaticResource IconButton}"
+                            Width="27" Height="27" Content="▧" Visibility="Collapsed"
+                            Foreground="#858680" FontSize="13" ToolTip="Выбрать изображение"
+                            AutomationProperties.Name="Выбрать изображение"
+                            Click="ChooseImage_Click"/>
+                    <Button Style="{StaticResource IconButton}" Content="×"
+                            Width="27" Height="27" FontSize="15" Foreground="#858680"
+                            ToolTip="Удалить" AutomationProperties.Name="Удалить карточку"
+                            Click="Delete_Click"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Border>
+</Window>
