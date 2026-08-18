@@ -1,3 +1,5 @@
+![Focus Overlay — задачи, заметки и референсы поверх других окон](assets/focus-overlay-banner.webp)
+
 # Focus Overlay
 
 Focus Overlay — маленькая программа для Windows, которая показывает задачи, заметки и картинки поверх других окон.
